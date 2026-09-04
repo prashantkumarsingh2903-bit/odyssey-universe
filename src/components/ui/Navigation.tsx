@@ -1,11 +1,13 @@
 import React from 'react';
-import { Compass, Book, Clock, GraduationCap, Sparkles, Plus, Hand } from 'lucide-react';
+import { Compass, Book, Clock, GraduationCap, Sparkles, Plus, Hand, Volume2, VolumeX } from 'lucide-react';
 import { useGraphStore } from '../../store/useGraphStore';
 import { useGestureStore } from '../../store/useGestureStore';
+import { useAudioStore } from '../../store/useAudioStore';
 
 export const Navigation = () => {
   const setCaptureModalOpen = useGraphStore(state => state.setCaptureModalOpen);
   const { isCameraActive, setCameraActive } = useGestureStore();
+  const { isAudioEnabled, enableAudio } = useAudioStore();
 
   return (
     <>
@@ -21,7 +23,7 @@ export const Navigation = () => {
         <div className="pt-4 border-t border-white/10">
           <button
             onClick={() => setCameraActive(!isCameraActive)}
-            className={`flex items-center gap-4 uppercase tracking-widest text-xs transition-colors duration-300 ${
+            className={`flex items-center gap-4 uppercase tracking-widest text-xs transition-colors duration-300 mb-4 ${
               isCameraActive ? 'text-blue-400 font-medium' : 'text-white/40 hover:text-white'
             }`}
           >
@@ -31,6 +33,20 @@ export const Navigation = () => {
               <Hand size={16} />
             </span>
             <span>{isCameraActive ? 'Gestures: On' : 'Hand Control'}</span>
+          </button>
+          
+          <button
+            onClick={() => !isAudioEnabled && enableAudio()}
+            className={`flex items-center gap-4 uppercase tracking-widest text-xs transition-colors duration-300 ${
+              isAudioEnabled ? 'text-green-400 font-medium' : 'text-white/40 hover:text-white'
+            }`}
+          >
+            <span className={`flex items-center justify-center w-8 h-8 rounded-full ${
+              isAudioEnabled ? 'bg-green-500/20 text-green-300 border border-green-400/40' : 'bg-white/5'
+            }`}>
+              {isAudioEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            </span>
+            <span>{isAudioEnabled ? 'Audio: On' : 'Enable Audio'}</span>
           </button>
         </div>
       </nav>

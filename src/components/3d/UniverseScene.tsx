@@ -4,7 +4,12 @@ import { BlackHole } from './BlackHole';
 import { ParticleSystem } from './ParticleSystem';
 import { Connections } from './Connections';
 import { GestureCameraRig } from './GestureCameraRig';
+import { GalaxySystem } from './GalaxySystem';
+import { PostProcessingManager } from './PostProcessingManager';
+import { Monolith } from './Monolith';
 import { useGestureStore } from '../../store/useGestureStore';
+// @ts-ignore
+import WebGPURenderer from 'three/webgpu';
 
 export const UniverseScene = () => {
   const { isCameraActive, handDetected } = useGestureStore();
@@ -14,11 +19,19 @@ export const UniverseScene = () => {
     <div className="absolute inset-0 w-full h-full z-0">
       <Canvas
         camera={{ position: [0, 2, 12], fov: 60 }}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={(canvas) => new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance' })}
       >
         {/* The Black Hole shader renders as a background quad */}
         <BlackHole />
+
+        {/* WebGPU Procedural Galaxy System */}
+        <GalaxySystem />
         
+        {/* Procedural Audio Monolith Prop */}
+        <Monolith position={[5, 0, -5]} size={2} />
+        
+        {/* WebGPU Post-Processing Pipeline */}
+        <PostProcessingManager />
         {/* Ambient lighting for normal 3D objects */}
         <ambientLight intensity={0.2} />
         
