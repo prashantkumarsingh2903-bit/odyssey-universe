@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #050505;
+  --color-surface: #111111;
+  --color-primary: #ffffff;
+  --color-muted: #888888;
+  --color-accent-idea: #F5A623;
+  --color-accent-knowledge: #4A90E2;
+  --color-accent-activity: #7ED321;
+  --color-accent-learning: #9013FE;
+  --color-accent-reflection: #F8E71C;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-primary);
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}

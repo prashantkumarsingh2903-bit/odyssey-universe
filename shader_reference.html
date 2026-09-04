@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyper Realistic Black Hole Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #info {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            pointer-events: none;
+            text-shadow: 0 2px 10px rgba(0,0,0,1);
+            z-index: 10;
+        }
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 28px;
+            font-weight: 200;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+        }
+        p {
+            margin: 0;
+            font-size: 14px;
+            opacity: 0.7;
+            font-weight: 300;
+            letter-spacing: 1px;
+        }
+        .hint {
+            margin-top: 15px; 
+            font-size: 12px; 
+            opacity: 0.5;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .hint::before {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 1px;
+            background: white;
+        }
+    </style>
+    <!-- Include Three.js for WebGL context management -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="info">
+        <h1>Gargantua</h1>
+        <p>Interactive Gravitational Lensing Simulation</p>
+        <p class="hint">Click and drag to explore spacetime</p>
+    </div>
+
+    <script>
+        // A minimal Vertex Shader that just passes through coordinates for a full-screen quad
+        const vertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = vec4(position, 1.0);
+            }
+        `;
+
+        // The Fragment Shader: Where the physics and rendering magic happens
+        // Implements raymarching, gravitational lensing, and an accretion disk
+        const fragmentShader = `
+            uniform float iTime;
+            uniform vec2 iResolution;
+            uniform vec2 iCameraRot;
+            
+            // Simulation Parameters
+            #define STEPS 120
+            #define MAX_DIST 25.0
+            #define EVENT_HORIZON 0.8
+            #define MASS 0.95
+            
+            // Pseudo-random noise function
+            float hash(vec2 p) {
+                p = fract(p * vec2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return fract(p.x * p.y);
+            }
+
+            // Value noise
+            float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                float a = hash(i);
+                float b = hash(i + vec2(1.0, 0.0));
+                float c = hash(i + vec2(0.0, 1.0));
+                float d = hash(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+
+            // Fractal Brownian Motion for complex textures
+            float fbm(vec2 p) {
+                float v = 0.0;
+                float a = 0.5;
+                mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.5));
+                for (int i = 0; i < 6; i++) {
+                    v += a * noise(p);
+                    p = rot * p * 2.0;
+                    a *= 0.5;
+                }
+                return v;
+            }
+
+            // Procedural Cosmic Background (Stars and Nebula)
+            vec3 getBackground(vec3 dir) {
+                vec2 uv = vec2(atan(dir.z, dir.x), asin(dir.y));
+                
+                // Nebula clouds
+                float n = fbm(uv * 4.0 + vec2(iTime * 0.05, 0.0));
+                
+                // Stars
+                float starNoise = hash(uv * 150.0);
+                float star = pow(starNoise, 80.0) * 3.0;
+                
+                vec3 bg = vec3(0.02, 0.03, 0.08) * n; // Dark blue nebula
+                bg += vec3(0.2, 0.4, 0.7) * fbm(uv * 12.0 + 10.0) * 0.15; // Lighter gas
+                bg += vec3(1.0, 0.9, 1.0) * star; // Star brightness
+                
+                return max(bg, vec3(0.0));
+            }
+
+            // Volumetric Accretion Disk
+            vec4 accretionDisk(vec3 pos, float r) {
+                float innerRad = EVENT_HORIZON + 0.3;
+                float outerRad = 6.0;
+                float thickness = 0.08; // Base thickness of the disk
+                
+                // Early exit if outside bounds
+                if (r < innerRad || r > outerRad) return vec4(0.0);
+                
+                // Flaring thickness (thicker further out)
+                float currentThickness = thickness * (1.0 + (r - innerRad) * 0.2);
+                
+                float h = abs(pos.y);
+                if (h > currentThickness) return vec4(0.0);
+                
+                // Vertical density falloff
+                float density = smoothstep(currentThickness, 0.0, h);
+                
+                // Radial density falloff
+                density *= smoothstep(outerRad, outerRad - 1.5, r);
+                density *= smoothstep(innerRad, innerRad + 0.3, r);
+                
+                // Rotation dynamics (Keplerian)
+                float angle = atan(pos.z, pos.x);
+                float speed = 2.5 / sqrt(r); 
+                
+                // Swirling texture
+                vec2 uv = vec2(r * 2.5, angle * 2.0 - iTime * speed);
+                float n = fbm(uv * 3.0 + iTime * 0.1);
+                
+                // Density variation
+                density *= (n * 1.5 + 0.5);
+                
+                // Temperature / Color gradient based on radius
+                vec3 hot = vec3(1.0, 0.9, 0.6); // Inner edge, super hot white/yellow
+                vec3 warm = vec3(1.0, 0.4, 0.1); // Middle, orange
+                vec3 cool = vec3(0.4, 0.1, 0.05); // Outer edge, deep red
+                
+                float temp = smoothstep(outerRad, innerRad, r);
+                vec3 col = mix(cool, warm, smoothstep(0.0, 0.6, temp));
+                col = mix(col, hot, smoothstep(0.6, 1.0, temp));
+                
+                // Super bright filaments
+                col += vec3(1.0, 0.8, 0.5) * pow(n, 4.0) * 2.5; 
+                
+                // Relativistic Doppler Beaming
+                // The side rotating towards the camera appears brighter and bluer
+                vec3 tangent = vec3(-sin(angle), 0.0, cos(angle));
+                vec3 viewDir = normalize(pos);
+                float doppler = dot(tangent, viewDir);
+                
+                // Adjust brightness based on direction
+                float beaming = 1.0 + 0.8 * doppler; 
+                
+                // Return color and alpha contribution
+                return vec4(col * density * beaming * 1.5, density * 0.12);
+            }
+
+            // Spherical Corona (Photon Sphere)
+            vec4 sphericalCorona(vec3 pos, float r) {
+                // Glow closest to the event horizon
+                float dist = r - EVENT_HORIZON;
+                if (dist > 1.2 || dist < 0.0) return vec4(0.0);
+                
+                float density = smoothstep(1.2, 0.0, dist);
+                density = pow(density, 4.0); // Extremely sharp falloff so it's a thin shell
+                
+                // Swirling effect covering the whole sphere
+                vec3 norm = normalize(pos);
+                float angle = iTime * 0.5;
+                
+                // Rotate the sample coordinates for spherical swirling
+                float s = sin(angle), c = cos(angle);
+                mat2 rotMap = mat2(c, -s, s, c);
+                vec3 rotPos = pos;
+                rotPos.xz *= rotMap;
+                rotPos.xy *= rotMap; 
+                
+                float n = fbm(rotPos * 3.0 - iTime * 0.2);
+                density *= (n * 1.5 + 0.5);
+                
+                // Bright high-energy plasma color
+                vec3 col = vec3(1.0, 0.6, 0.1); 
+                
+                // Return color and alpha contribution (very low alpha so it is highly transparent)
+                return vec4(col * density * 2.0, density * 0.015);
+            }
+
+            // 2D Rotation Matrix
+            mat2 rot(float a) {
+                float s = sin(a), c = cos(a);
+                return mat2(c, -s, s, c);
+            }
+
+            void mainImage( out vec4 fragColor, in vec2 fragCoord ) {
+                // Normalized pixel coordinates (from -1 to 1)
+                vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
+                
+                // Interactive Camera Control
+                float pitch = iCameraRot.y; 
+                float yaw = iCameraRot.x; 
+
+                // Camera Setup
+                vec3 ro = vec3(0.0, 0.0, -10.0); // Ray origin
+                ro.yz *= rot(-pitch);
+                ro.xz *= rot(-yaw);
+                
+                // Ray direction
+                vec3 rd = normalize(vec3(uv.x, uv.y, 1.2)); // 1.2 controls FOV
+                rd.yz *= rot(-pitch);
+                rd.xz *= rot(-yaw);
+
+                vec3 col = vec3(0.0);
+                
+                // Raymarching State
+                vec3 pos = ro;
+                vec3 dir = rd;
+                float dt = 0.05; // Base step size
+                
+                vec4 diskCol = vec4(0.0);
+                
+                // The main physical simulation loop
+                for(int i = 0; i < STEPS; i++) {
+                    float r = length(pos);
+                    
+                    // 1. Check Event Horizon collision
+                    if (r < EVENT_HORIZON) {
+                        break; // Ray fell in, returns black
+                    }
+                    
+                    // 2. Check if ray escaped to infinity
+                    if (r > MAX_DIST) {
+                        col = getBackground(dir);
+                        break; // Get stars
+                    }
+                    
+                    // 3. Gravitational Lensing (Curved space-time)
+                    // The force pulling the ray is proportional to M/r^2
+                    float force = MASS / (r * r);
+                    dir = normalize(dir - normalize(pos) * force * dt);
+                    
+                    // 4. Sample the Accretion Disk and Corona
+                    vec4 sampleCol = accretionDisk(pos, r);
+                    vec4 coronaCol = sphericalCorona(pos, r);
+                    
+                    // Combine the flat disk and the spherical cloud
+                    sampleCol.rgb += coronaCol.rgb;
+                    sampleCol.a += coronaCol.a;
+                    
+                    // Alpha blending (front-to-back accumulation)
+                    diskCol.rgb += sampleCol.rgb * (1.0 - diskCol.a);
+                    diskCol.a += sampleCol.a;
+                    
+                    // Optimization: early exit if fully opaque
+                    if(diskCol.a >= 0.99) break;
+                    
+                    // Advance the ray
+                    pos += dir * dt;
+                }
+                
+                // Composite the background and the accretion disk
+                col = mix(col, diskCol.rgb, min(diskCol.a, 1.0));
+                
+                // Post-Processing
+                // Exposure tone mapping (ACES-like)
+                float exposure = 1.2;
+                col *= exposure;
+                col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
+                
+                // Gamma correction
+                col = pow(col, vec3(1.0/2.2));
+                
+                // Chromatic aberration / Color fringe at the edges
+                
+                // Subtle vignette
+                float vignette = length(uv);
+                col *= 1.0 - vignette * 0.25;
+
+                fragColor = vec4(col, 1.0);
+            }
+
+            void main() {
+                mainImage(gl_FragColor, gl_FragCoord.xy);
+            }
+        `;
+
+        // --- Application Logic ---
+        
+        let scene, camera, renderer, material;
+        let rotX = 0; 
+        let rotY = 0; 
+        let targetRotX = 0.5; // Initial yaw
+        let targetRotY = -0.4; // Initial pitch
+        let isDragging = false;
+        let previousMouseX = 0;
+        let previousMouseY = 0;
+        
+        function init() {
+            // Setup Three.js scene
+            scene = new THREE.Scene();
+            // Orthographic camera for full-screen quad
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            // Cap pixel ratio to 1.5 to maintain high framerate on high-res screens due to raymarching cost
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); 
+            document.body.appendChild(renderer.domElement);
+            
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            
+            material = new THREE.ShaderMaterial({
+                vertexShader: vertexShader,
+                fragmentShader: fragmentShader,
+                uniforms: {
+                    iTime: { value: 0.0 },
+                    iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                    iCameraRot: { value: new THREE.Vector2(0, 0) }
+                },
+                depthWrite: false,
+                depthTest: false
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+            
+            // Interaction Events
+            window.addEventListener('resize', onWindowResize);
+            
+            // Mouse controls
+            document.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMouseX = e.clientX;
+                previousMouseY = e.clientY;
+            });
+            document.addEventListener('mouseup', () => isDragging = false);
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const deltaX = e.clientX - previousMouseX;
+                    const deltaY = e.clientY - previousMouseY;
+                    targetRotX -= deltaX * 0.005;
+                    targetRotY -= deltaY * 0.005;
+                    targetRotY = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, targetRotY));
+                    previousMouseX = e.clientX;
+                    previousMouseY = e.clientY;
+                }
+            });
+            
+            // Touch controls
+            document.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                previousMouseX = e.touches[0].clientX;
+                previousMouseY = e.touches[0].clientY;
+            }, {passive: true});
+            document.addEventListener('touchend', () => isDragging = false);
+            document.addEventListener('touchmove', (e) => {
+                if (isDragging) {
+                    const deltaX = e.touches[0].clientX - previousMouseX;
+                    const deltaY = e.touches[0].clientY - previousMouseY;
+                    targetRotX -= deltaX * 0.005;
+                    targetRotY -= deltaY * 0.005;
+                    targetRotY = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, targetRotY));
+                    previousMouseX = e.touches[0].clientX;
+                    previousMouseY = e.touches[0].clientY;
+                }
+            }, {passive: true});
+            
+            // Start render loop
+            animate(0);
+        }
+        
+        function onWindowResize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            material.uniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
+        }
+        
+        function animate(time) {
+            requestAnimationFrame(animate);
+            
+            // Smooth mouse interpolation (inertia)
+            rotX += (targetRotX - rotX) * 0.1;
+            rotY += (targetRotY - rotY) * 0.1;
+            
+            material.uniforms.iTime.value = time * 0.001;
+            material.uniforms.iCameraRot.value.set(rotX, rotY);
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Boot up
+        init();
+    </script>
+</body>
+</html>
